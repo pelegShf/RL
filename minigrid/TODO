@@ -1,0 +1,2 @@
+[ ] Add to report that the xavier init dropped performance dramittlcy for the ddqn.
+[ ] Why dqn needs reward shaping and ddqn not?
