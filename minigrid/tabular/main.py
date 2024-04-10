@@ -79,6 +79,8 @@ def dqn(agent, n_episodes=10000, max_t=1600, eps_start=1.0, eps_end=0.02, eps_de
     return scores,ts
 
 
+
+
 # #DDQN
 # start_time = time.time()  # Start the timer
 # agent = DDQN(state_size=obs.shape, action_size=3, seed=0)
@@ -100,8 +102,9 @@ def dqn(agent, n_episodes=10000, max_t=1600, eps_start=1.0, eps_end=0.02, eps_de
 # print(f"DDQN - Time taken: {elapsed_time} seconds")
 
 start_time = time.time()  # Start the timer
-agent = DQN(state_size=obs.shape, action_size=3, seed=0)
-scores_dqn, timesteps_dqn = dqn(agent,n_episodes=2000)
+agent = DQN(env,state_size=obs.shape, action_size=3,LR=0.001, seed=0)
+
+scores_dqn, timesteps_dqn = agent.train()
 
 end_time = time.time()  # Stop the timer
 elapsed_time = end_time - start_time  # Calculate elapsed time

@@ -3,6 +3,47 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+class mini_network(nn.Module):
+    def __init__(self):
+        super(mini_network,self).__init__()
+
+
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=(8, 8), stride=4)
+        self.act1 = nn.ReLU()
+
+        self.flat = nn.Flatten()
+
+        self.fc1 = nn.Linear(6400, 3)  # Corrected input size
+        self.act3 = nn.ReLU()
+        self.fc2 = nn.Linear(256, 3)
+        self.act4 = nn.ReLU()
+
+        # self.apply(self.init_weights)
+
+
+    def init_weights(self, m):
+        if type(m) == nn.Linear or type(m) == nn.Conv2d:
+            nn.init.xavier_uniform_(m.weight)
+
+    def forward(self, x):
+        # print(x.shape)
+        x = self.conv1(x)
+        # print(x.shape)
+
+        x = self.act1(x)
+        # print(x.shape)
+
+        x = self.flat(x)
+
+        x = self.fc1(x)
+        # x = self.act3(x)
+        # x = self.fc2(x)
+
+        return x
+
+
+
+
 class network(nn.Module):
     def __init__(self):
         super(network,self).__init__()
