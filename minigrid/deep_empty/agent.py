@@ -8,7 +8,6 @@ import numpy as np
 import cv2
 
 from networks import network, mini_network
-from helpers import simple_reward,reward_shape_key
 
 class ReplayBuffer:
     def __init__(self, action_size, buffer_size, batch_size,device, seed):
@@ -38,14 +37,14 @@ class ReplayBuffer:
         return len(self.memory)
 
 class Agent():
-    def __init__(self, env,state_size, action_size,reward_shaping,loss,seed,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+    def __init__(self, env,loss,seed,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
         self.env = env
         self.env_name = env.__class__.__name__
-        self.state_size = state_size
-        self.action_size = action_size
-        print("Action size: ", self.action_size)
+        self.state_size = self.__set_state_size()
+        self.action_size = self.env.action_space.n
         self.action_range = np.arange(self.action_size)
-        self.reward_shaping = reward_shaping
+        # reward shaping based on the environment
+        self.reward_shaping = self.__simple_reward if self.env_name == "EMPTYRGBImgObsWrapper" else self.__reward_shape_key
         self.seed = random.seed(seed)
         self.batch_size = batch_size
         self.gamma = gamma
@@ -58,7 +57,7 @@ class Agent():
         self.network_local = network().to(self.device)
         self.optimizer = optim.Adam(self.network_local.parameters(), lr = LR)
         self.loss = loss
-        self.memory = ReplayBuffer(action_size, replay_buffer_size, self.batch_size,device=self.device,seed= seed)
+        self.memory = ReplayBuffer(self.action_size, replay_buffer_size, self.batch_size,device=self.device,seed= seed)
         
         self.t_step = 0
 
@@ -92,22 +91,13 @@ class Agent():
         else:
             action = random.choice(self.action_range)
             return action
-        
-    def preprocess_obs(self,obs):
-        width, height = obs.shape[1], obs.shape[0] #get width and height of the image
-        obs = obs[int(height/10):int(height-height/10), int(width/10):int(width-width/10)]  # crop image by 10% from all sides
-        obs = cv2.resize(obs, (84, 84))    #resize image
-        obs = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)   #convert to grayscale
-        obs = obs / 255.0 # Normlize state values to [0,1]
-        return obs
-    
+   
     def train(self, n_episodes=10000, max_t=1600, eps_start=1.0, eps_end=0.02, eps_decay=0.995):
         scores,ts = [],[]                  # list containing scores from each episode
         scores_window,ts_window = deque(maxlen=100), deque(maxlen=100) # last 100 scores
         eps = eps_start                    # initialize epsilon
         for i_episode in range(1, n_episodes+1):
             initial_state, _ = self.env.reset()
-            # state = np.reshape(initial_state, [1, state_size])
             state = self.preprocess_obs(initial_state)
             score = 0
             for t in range(max_t):
@@ -117,16 +107,14 @@ class Agent():
                     isDoorOpen = int(self.env.is_door_open())
                 next_state, reward, done, _, _ = self.env.step(action)  # Adjusted to match the five return values
                 next_state = self.preprocess_obs(next_state)
+                
                 if(self.env_name == "EMPTYRGBImgObsWrapper"):
-                    reward = simple_reward(reward)
+                    reward = self.reward_shaping(reward)
                 else:
                     hasKey_tag = int(self.env.is_carrying_key())
                     isDoorOpen_tag = int(self.env.is_door_open())
-                    reward = reward_shape_key(hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen)
+                    reward = self.reward_shaping(hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen)
 
-                # if(reward == 0.0):
-                #   reward = -0.1
-                # next_state = np.reshape(next_state, [1, state_size])
                 self.step(state, action, reward, next_state, done)
                 state = next_state
                 score += reward
@@ -144,10 +132,35 @@ class Agent():
                 
         return scores,ts
 
+    def __preprocess_obs(self,obs):
+        width, height = obs.shape[1], obs.shape[0] #get width and height of the image
+        obs = obs[int(height/10):int(height-height/10), int(width/10):int(width-width/10)]  # crop image by 10% from all sides
+        obs = cv2.resize(obs, (84, 84))    #resize image
+        obs = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)   #convert to grayscale
+        obs = obs / 255.0 # Normlize state values to [0,1]
+        return obs
+    
+    def __set_state_size(self):
+        obs = self.env.reset()[0]
+        obs = self.__preprocess_obs(obs)
+        return obs.shape
 
+    def __simple_reward(self,reward):
+        if reward == 0.0:
+            return -0.1
+        return reward
+
+    def __reward_shape_key(self,hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen):
+        if(hasKey_tag > hasKey or isDoorOpen_tag > isDoorOpen):
+            return 2
+        elif(isDoorOpen_tag  < isDoorOpen or hasKey_tag < hasKey):
+            return -1
+        else:
+            return -0.1
+        
 class DQN(Agent):
-    def __init__(self,env,state_size, action_size,reward_shaping=simple_reward,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,state_size, action_size,reward_shaping,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+    def __init__(self,env,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+        super().__init__(env,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
         self.name = "DQN"
 
 
@@ -170,8 +183,8 @@ class DQN(Agent):
 
 
 class DDQN(Agent):
-    def __init__(self,env,state_size, action_size,reward_shaping=simple_reward,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,state_size, action_size,reward_shaping,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+    def __init__(self,env,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+        super().__init__(env,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
         
         self.name = "DDQN"
         self.network_target = mini_network().to(self.device)
@@ -201,9 +214,10 @@ class DDQN(Agent):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(SOFT_UPDATE_RATE*local_param.data + (1.0-SOFT_UPDATE_RATE)*target_param.data)
 
+
 class REINFORCE(Agent):
-    def __init__(self,env,state_size, action_size,reward_shaping=simple_reward,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,state_size, action_size,reward_shaping,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+    def __init__(self,env,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+        super().__init__(env,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
         self.name = "REINFORCE"
     
     

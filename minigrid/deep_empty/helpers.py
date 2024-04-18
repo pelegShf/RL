@@ -30,18 +30,7 @@ from minigrid_x import MiniGridEnv
 from gym import spaces
 import random
 
-def simple_reward(reward):
-    if reward == 0.0:
-        return -0.1
-    return reward
 
-def reward_shape_key(hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen):
-      if(hasKey_tag > hasKey or isDoorOpen_tag > isDoorOpen):
-        return 2
-      elif(isDoorOpen_tag  < isDoorOpen or hasKey_tag < hasKey):
-        return -1
-      else:
-       return -0.1
       
 
 class RandomEmptyEnv_10(MiniGridEnv):
