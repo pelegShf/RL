@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 
-from networks import network, mini_network
+from networks import network, mini_network, reinforce_network
 
 class ReplayBuffer:
     def __init__(self, action_size, buffer_size, batch_size,device, seed):
@@ -37,7 +37,7 @@ class ReplayBuffer:
         return len(self.memory)
 
 class Agent():
-    def __init__(self, env,loss,seed,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+    def __init__(self, env,seed=42,local_network=network,loss=F.mse_loss,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
         self.env = env
         self.env_name = env.__class__.__name__
         self.state_size = self.__set_state_size()
@@ -54,7 +54,7 @@ class Agent():
         self.replay_buffer_size = replay_buffer_size
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
 
-        self.network_local = network().to(self.device)
+        self.network_local = local_network().to(self.device)
         self.optimizer = optim.Adam(self.network_local.parameters(), lr = LR)
         self.loss = loss
         self.memory = ReplayBuffer(self.action_size, replay_buffer_size, self.batch_size,device=self.device,seed= seed)
@@ -98,7 +98,7 @@ class Agent():
         eps = eps_start                    # initialize epsilon
         for i_episode in range(1, n_episodes+1):
             initial_state, _ = self.env.reset()
-            state = self.preprocess_obs(initial_state)
+            state = self.__preprocess_obs(initial_state)
             score = 0
             for t in range(max_t):
                 action = self.act(state,eps=eps)  # Choose an action
@@ -106,7 +106,7 @@ class Agent():
                     hasKey = int(self.env.is_carrying_key())
                     isDoorOpen = int(self.env.is_door_open())
                 next_state, reward, done, _, _ = self.env.step(action)  # Adjusted to match the five return values
-                next_state = self.preprocess_obs(next_state)
+                next_state = self.__preprocess_obs(next_state)
                 
                 if(self.env_name == "EMPTYRGBImgObsWrapper"):
                     reward = self.reward_shaping(reward)
@@ -124,7 +124,7 @@ class Agent():
             scores.append(score)              # save most recent score
             ts_window.append(t)
             ts.append(t)
-            if((self.name == "DQN" and i_episode >25) or self.name != "DQN"):
+            if((self.name == "DQN" and i_episode >60) or self.name != "DQN"):
                 eps = max(eps_end, eps_decay*eps) # decrease epsilon
             print('Episode {}\tAverage Score: {:.2f}\tAverage steps: {:.2f}\tEpsilon {:.2f} \n'.format(i_episode, np.mean(scores_window), np.mean(ts_window),eps), end="")
             if i_episode % 100 == 0:
@@ -135,7 +135,7 @@ class Agent():
     def __preprocess_obs(self,obs):
         width, height = obs.shape[1], obs.shape[0] #get width and height of the image
         obs = obs[int(height/10):int(height-height/10), int(width/10):int(width-width/10)]  # crop image by 10% from all sides
-        obs = cv2.resize(obs, (84, 84))    #resize image
+        obs = cv2.resize(obs, (84, 84))    #resize image       
         obs = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)   #convert to grayscale
         obs = obs / 255.0 # Normlize state values to [0,1]
         return obs
@@ -159,8 +159,8 @@ class Agent():
             return -0.1
         
 class DQN(Agent):
-    def __init__(self,env,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+    def __init__(self,env,local_network=network,loss=F.mse_loss,seed=42,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+        super().__init__(env,seed,local_network,loss,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
         self.name = "DQN"
 
 
@@ -183,8 +183,8 @@ class DQN(Agent):
 
 
 class DDQN(Agent):
-    def __init__(self,env,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+    def __init__(self,env,network=network,loss=F.mse_loss,seed=42,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+        super().__init__(env,seed,network,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
         
         self.name = "DDQN"
         self.network_target = mini_network().to(self.device)
@@ -216,8 +216,8 @@ class DDQN(Agent):
 
 
 class REINFORCE(Agent):
-    def __init__(self,env,loss=F.mse_loss,seed=0,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+    def __init__(self,env,local_network=reinforce_network,seed=42,batch_size=64,gamma=0.99,LR=5e-4):
+        super().__init__(env=env,seed=seed,local_network=local_network,batch_size=batch_size,gamma=gamma,LR=LR)
         self.name = "REINFORCE"
     
     
@@ -239,10 +239,10 @@ class REINFORCE(Agent):
         for log_prob, Gt in zip(log_probs, discounted_rewards):
             policy_gradient.append(-log_prob * Gt)
         
-        self.policy_network.optimizer.zero_grad()
+        self.network_local.optimizer.zero_grad()
         policy_gradient = T.stack(policy_gradient).sum()
         policy_gradient.backward()
-        self.policy_network.optimizer.step()
+        self.network_local.optimizer.step()
 
     def train(self,n_episodes,max_t):
         numsteps = []
@@ -250,20 +250,28 @@ class REINFORCE(Agent):
         all_rewards = []
         scores,ts = [],[]                  # list containing scores from each episode
         scores_window,ts_window = deque(maxlen=100), deque(maxlen=100) # last 100 scores
-            
+        print("here")
         for episode in range(1,n_episodes+1):
             state,_ = self.env.reset()
-            state = self.preprocess_obs(state)
+            state = super()._Agent__preprocess_obs(state)
             log_probs = []
             rewards = []
             score = 0
             for steps in range(max_t):
+                if(self.env_name != "EMPTYRGBImgObsWrapper"):
+                    hasKey = int(self.env.is_carrying_key())
+                    isDoorOpen = int(self.env.is_door_open())
                 state = np.expand_dims(state, axis=0)
-                action, log_prob = self.policy_net.get_action(state)
+                action, log_prob = self.network_local.get_action(state)
                 new_state, reward, done, _,_ = self.env.step(action)
-                if(reward == 0.0):
-                    reward = -0.1
-                new_state = self.preprocess_obs(new_state)
+                if(self.env_name == "EMPTYRGBImgObsWrapper"):
+                    reward = self.reward_shaping(reward)
+                else:
+                    hasKey_tag = int(self.env.is_carrying_key())
+                    isDoorOpen_tag = int(self.env.is_door_open())
+                    reward = self.reward_shaping(hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen)
+
+                new_state = super()._Agent__preprocess_obs(new_state)
                 log_probs.append(log_prob)
                 rewards.append(reward)
                 score += reward

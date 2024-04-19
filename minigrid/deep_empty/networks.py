@@ -113,8 +113,9 @@ class reinforce_network(nn.Module):
         self.fc2 = nn.Linear(256, 3)
         self.act4 = nn.Softmax(dim=1)
         # self.apply(self.init_weights)
-        self.optimizer = optim.Adam(self.parameters(), lr=3e-4)
+        self.optimizer = optim.Adam(self.parameters(), lr=3e-3)
         
+        self.apply(self.init_weights)
 
     def init_weights(self, m):
         if type(m) == nn.Linear or type(m) == nn.Conv2d:
