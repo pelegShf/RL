@@ -331,12 +331,68 @@ class KEYRGBImgObsWrapper(gym.core.ObservationWrapper):
         return self._preprocess(obs), info
 
     def step(self, action):
+        was_open = self.is_door_open()
+        was_key = self.is_carrying_key()
         action = ACTION_MAP[action]
         obs, r, d, info, x = super().step(action)
         obs = self._preprocess(obs)
 
         # TODO: REWARD SHAPING
         #we encourage you to come up with a better reward function using  self.is_door_open() and self.is_carrying_key()
+        if r>0 :
+           print("TTTTT")
+        # obs = self.preprocesss(obs)
+        is_open = self.is_door_open()
+        is_key = self.is_carrying_key()
+        if is_key and was_key == False:
+          print("get key")
+          r += 0.1
+        if is_open and was_open == False:
+          print("door open")
+          r += 0.2
+        elif was_open and is_open == False:
+          print("door close")
+          r -= 0.7
+        r-=0.0005
+
 
         return obs, r, d, info, x
 
+
+
+def show_progress(rewards_all_episodes, finished_in, skip):
+    """
+    Display the progress of the training episodes.
+
+    Parameters:
+    - rewards_all_episodes (list): List containing rewards for all episodes during training.
+    - finished_in (list): List containing the number of steps taken to finish each episode.
+
+    Explanation:
+    This function plots the progress of training episodes across two subplots.
+    The first subplot shows the average score per 50 steps over the course of training.
+    The second subplot shows the average number of steps taken to finish episodes per 50 steps.
+    The x-axis represents the number of episodes, and the y-axis represents the corresponding values.
+    """
+    _, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    length = len(rewards_all_episodes)
+
+    # Plot first subplot
+    average_scores = [np.mean(rewards_all_episodes[i:i+skip]) for i in range(0, length, skip)]
+    ax1.plot(np.arange(1, length + 1, skip), average_scores, marker='o', linestyle='-', color='r', label='Average Score (per 50 steps)')
+    ax1.set_xlabel('X')
+    ax1.set_ylabel('Y')
+    ax1.set_title('Average Score')
+
+    # Plot second subplot
+    average_finished = [np.mean(finished_in[i:i+skip]) for i in range(0, length, skip)]
+    ax2.plot(np.arange(1, length + 1, skip), average_finished, marker='o', linestyle='-', color='r', label='Average finished (per 50 steps)')
+    ax2.set_xlabel('X')
+    ax2.set_ylabel('Y')
+    ax2.set_title('average step to finish')
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+
+    # Show the plots
+    plt.savefig(f'reward_{len(rewards_all_episodes)}.png')

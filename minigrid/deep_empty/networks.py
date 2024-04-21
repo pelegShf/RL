@@ -47,10 +47,9 @@ class mini_network(nn.Module):
 
 
 class network(nn.Module):
-    def __init__(self):
+    def __init__(self,seed=42):
         super(network,self).__init__()
-
-
+        self.seed = T.manual_seed(seed)
         self.conv1 = nn.Conv2d(1, 16, kernel_size=(8, 8), stride=4)
         self.act1 = nn.ReLU()
 
@@ -59,9 +58,9 @@ class network(nn.Module):
 
         self.flat = nn.Flatten()
 
-        self.fc1 = nn.Linear(2592, 256)  # Corrected input size
+        self.fc1 = nn.Linear(2592, 512)  # Corrected input size
         self.act3 = nn.ReLU()
-        self.fc2 = nn.Linear(256, 5)
+        self.fc2 = nn.Linear(512, 5)
         self.act4 = nn.ReLU()
 
         # self.apply(self.init_weights)
@@ -110,7 +109,7 @@ class reinforce_network(nn.Module):
 
         self.fc1 = nn.Linear(2592, 256)  # Corrected input size
         self.act3 = nn.ReLU()
-        self.fc2 = nn.Linear(256, 3)
+        self.fc2 = nn.Linear(256, 5)
         self.act4 = nn.Softmax(dim=1)
         # self.apply(self.init_weights)
         self.optimizer = optim.Adam(self.parameters(), lr=3e-3)
@@ -140,8 +139,9 @@ class reinforce_network(nn.Module):
         return x        
 
     def get_action(self, state):
-        state = T.from_numpy(state).float().unsqueeze(0)
+        state = state.float().unsqueeze(0)
         probs = self.forward(state)
-        highest_prob_action = np.random.choice(3, p=np.squeeze(probs.detach().numpy()))
+        highest_prob_action = np.random.choice(5, p=np.squeeze(probs.detach().cpu().numpy()))
         log_prob = T.log(probs.squeeze(0)[highest_prob_action])
         return highest_prob_action, log_prob
+

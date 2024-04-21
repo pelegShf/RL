@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 
 from networks import network, mini_network, reinforce_network
+from helpers import show_progress
 
 class ReplayBuffer:
     def __init__(self, action_size, buffer_size, batch_size,device, seed):
@@ -17,6 +18,8 @@ class ReplayBuffer:
         self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
         self.seed = random.seed(seed)
         self.device = device
+
+
     def add(self, state, action, reward, next_state, done):
         e = self.experience(state, action, reward, next_state, done)
         self.memory.append(e)
@@ -44,8 +47,8 @@ class Agent():
         self.action_size = self.env.action_space.n
         self.action_range = np.arange(self.action_size)
         # reward shaping based on the environment
-        self.reward_shaping = self.__simple_reward if self.env_name == "EMPTYRGBImgObsWrapper" else self.__reward_shape_key
-        self.seed = random.seed(seed)
+        self.reward_shaping = self.__simple_reward if self.env_name == "EMPTYRGBImgObsWrapper" else self.__key_reward_shape
+        
         self.batch_size = batch_size
         self.gamma = gamma
         self.soft_update_rate = soft_update
@@ -61,10 +64,29 @@ class Agent():
         
         self.t_step = 0
 
+        self.is_holding_key = 0
+        self.is_door_open = 0
+        # For debug
+        self.picked_key =0
+        self.opened_door =0
+        self.closed_door =0
+        self.dropped_key =0
+        self.finished = 0
+
+        self.print_every = 10
+
+        self.seed = random.seed(seed)
+        random.seed(seed)
+        np.random.seed(seed)
+        T.manual_seed(seed)
+        if T.cuda.is_available():
+            T.cuda.manual_seed_all(seed)
+    
+
     
     def step(self, state, action, reward, next_state, done):
-        state = np.expand_dims(state, axis=0)
-        next_state = np.expand_dims(next_state, axis=0)
+        # state = np.expand_dims(state, axis=0)
+        # next_state = np.expand_dims(next_state, axis=0)
         self.memory.add(state, action, reward, next_state, done)
         # Learn every UPDATE_EVERY time steps.
         self.t_step = (self.t_step + 1) % self.update_every
@@ -75,62 +97,68 @@ class Agent():
                 self.learn(experiences, self.gamma)
     
     def act(self, state, eps=0.):
-        if(len(state.shape) == 2):
-            state = np.expand_dims(state, axis=0)
+        # if(len(state.shape) == 2):
+        #     state = np.expand_dims(state, axis=0)
         state = T.from_numpy(state).float().unsqueeze(0).to(self.device)
         self.network_local.eval()
         with T.no_grad():
-            #Forward step
             action_values = self.network_local(state)
         self.network_local.train()
 
         # Epsilon-greedy action selection
-        rand = random.random()
         if random.random() > eps:
-            return T.argmax(action_values).item()
+            # return T.argmax(action_values).item()
+            return np.argmax(action_values.cpu().data.numpy())
         else:
             action = random.choice(self.action_range)
             return action
    
     def train(self, n_episodes=10000, max_t=1600, eps_start=1.0, eps_end=0.02, eps_decay=0.995):
-        scores,ts = [],[]                  # list containing scores from each episode
+        scores,finished_in = [],[]                  # list containing scores from each episode
         scores_window,ts_window = deque(maxlen=100), deque(maxlen=100) # last 100 scores
         eps = eps_start                    # initialize epsilon
         for i_episode in range(1, n_episodes+1):
+            if i_episode%50 == 0:
+                show_progress(scores,finished_in,20)
             initial_state, _ = self.env.reset()
             state = self.__preprocess_obs(initial_state)
+            state = state.reshape(-1,*state.shape) # From (W,H) to (1,W,H)
             score = 0
             for t in range(max_t):
                 action = self.act(state,eps=eps)  # Choose an action
-                if(self.env_name != "EMPTYRGBImgObsWrapper"):
-                    hasKey = int(self.env.is_carrying_key())
-                    isDoorOpen = int(self.env.is_door_open())
-                next_state, reward, done, _, _ = self.env.step(action)  # Adjusted to match the five return values
+                next_state, reward, done, _, _ = self.env.step(action) 
                 next_state = self.__preprocess_obs(next_state)
-                
-                if(self.env_name == "EMPTYRGBImgObsWrapper"):
-                    reward = self.reward_shaping(reward)
-                else:
-                    hasKey_tag = int(self.env.is_carrying_key())
-                    isDoorOpen_tag = int(self.env.is_door_open())
-                    reward = self.reward_shaping(hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen)
-
+                next_state = next_state.reshape(-1,*next_state.shape) # From (W,H) to (1,W,H)
+                # reward = self.reward_shaping(reward)
                 self.step(state, action, reward, next_state, done)
                 state = next_state
                 score += reward
                 if done:
                     break
+            finished_in.append(t)
+            print(f"finish in {t}")
             scores_window.append(score)       # save most recent score
             scores.append(score)              # save most recent score
             ts_window.append(t)
-            ts.append(t)
-            if((self.name == "DQN" and i_episode >60) or self.name != "DQN"):
-                eps = max(eps_end, eps_decay*eps) # decrease epsilon
-            print('Episode {}\tAverage Score: {:.2f}\tAverage steps: {:.2f}\tEpsilon {:.2f} \n'.format(i_episode, np.mean(scores_window), np.mean(ts_window),eps), end="")
+            slope = (eps_start - eps_end) / 1500
+
+            # if((self.name == "DQN" and i_episode >60) or self.name != "DQN"):
+            #     eps = max(eps_end, eps_decay*eps) # decrease epsilon
+            eps = max(eps_end, eps_start - slope * i_episode)
+            print(f"Epsilon: {eps}")
+            if(i_episode % self.print_every == 0): 
+                print('Episode {}\tAverage Score: {:.2f}\tAverage steps: {:.2f}\tEpsilon {:.2f} \n'.format(i_episode, np.mean(scores_window), np.mean(ts_window),eps), end="")
+                # print(f"Finished: {self.finished} Keys picked: {self.picked_key} keys dropped: {self.dropped_key} | Doors opened: {self.opened_door}  doors closed: {self.closed_door}")
+                self.picked_key = 0
+                self.opened_door = 0
+                self.dropped_key = 0
+                self.closed_door = 0
+                self.finished = 0
+
             if i_episode % 100 == 0:
                 T.save(self.network_local.state_dict(), f'checkpoint_{self.name}{i_episode}.pth')
                 
-        return scores,ts
+        return scores,finished_in
 
     def __preprocess_obs(self,obs):
         width, height = obs.shape[1], obs.shape[0] #get width and height of the image
@@ -150,13 +178,38 @@ class Agent():
             return -0.1
         return reward
 
-    def __reward_shape_key(self,hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen):
-        if(hasKey_tag > hasKey or isDoorOpen_tag > isDoorOpen):
-            return 2
-        elif(isDoorOpen_tag  < isDoorOpen or hasKey_tag < hasKey):
-            return -1
-        else:
+    def __key_reward_shape(self,reward):
+        is_door_open_tag = self.env.is_door_open()
+        is_holding_key_tag =  self.env.is_carrying_key()
+        if(is_door_open_tag and not self.is_door_open):
+            self.is_door_open = True
+            self.opened_door += 1
+            return 0.2
+        elif (is_holding_key_tag and not self.is_holding_key): # closed door state
+            self.is_holding_key = True
+            self.picked_key +=1
+            return  0.2
+        elif (not is_door_open_tag and  self.is_door_open): # closed door state
+            self.is_door_open = False
+            self.closed_door +=1
+            return -2
+        elif(reward == 0): # normal state
             return -0.1
+        else: # End state
+            self.finished +=1
+            return 10
+
+    #TODO: add this to work with the agent.
+    def __decay_epsilon(self,episodes):
+        if self.decay == "linear":
+            epsilon_delta = (self.epsilon_start - self.epsilon_end) / episodes
+            self.eps = np.maximum(self.eps - epsilon_delta, self.epsilon_end)
+        elif self.decay == "exp":
+            decay_factor = (self.epsilon_end / self.epsilon_start) ** (1 / episodes)
+            self.eps = np.maximum(self.eps * decay_factor, self.epsilon_end)
+        elif self.decay == "mul":
+            new_eps = self.eps * self.epsilon_mul
+            self.eps = np.maximum(new_eps, self.epsilon_end)
         
 class DQN(Agent):
     def __init__(self,env,local_network=network,loss=F.mse_loss,seed=42,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
@@ -173,25 +226,47 @@ class DQN(Agent):
         q_targets = rewards + gamma * q_targets_next * (1 - dones)
         q_expected = self.network_local(states).gather(1, actions)
 
-        ### Loss calculation (we used Mean squared error)
-        # loss = F.mse_loss(q_expected, q_targets)
-        # loss = F.huber_loss(q_expected, q_targets)
+
+        loss = self.loss(q_expected, q_targets)
+        self.optimizer.zero_grad()
+        loss.backward()
+        T.nn.utils.clip_grad_norm_(self.network_local.parameters(), 1)  # You can adjust the clipping value as needed
+
+        self.optimizer.step()
+
+
+class DDQN(Agent):
+    def __init__(self,env,local_network=network,loss=F.mse_loss,seed=42,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
+        super().__init__(env,seed,local_network,loss,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
+        
+        self.name = "DDQN"
+        self.network_target = local_network().to(self.device)
+
+    def learn(self, experiences, gamma):
+        states, actions, rewards, next_states, dones = experiences
+
+        # Compute and minimize the loss
+        states = states.unsqueeze(1)
+        next_states = next_states.unsqueeze(1)
+
+        # Double Q-Learning
+        q_values_next = self.network_local(next_states).detach()
+        best_actions_indices = q_values_next.argmax(dim=1).unsqueeze(1)
+        targets_target_q_values = self.network_target(next_states)
+        targets_selected_q_values = T.gather(input=targets_target_q_values, dim=1, index=best_actions_indices)
+        q_targets = rewards + gamma * targets_selected_q_values * (1 - dones)
+
+        q_expected = self.network_local(states).gather(1, actions)
+
+        # Loss calculation (we used Mean squared error)
         loss = self.loss(q_expected, q_targets)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        self.soft_update(self.network_local, self.network_target, self.soft_update_rate)
 
-class DDQN(Agent):
-    def __init__(self,env,network=network,loss=F.mse_loss,seed=42,batch_size=64,gamma=0.99,soft_update=1e-3,LR=5e-4,update_every=5,replay_buffer_size=10000):
-        super().__init__(env,seed,network,loss,seed,batch_size,gamma,soft_update,LR,update_every,replay_buffer_size)
-        
-        self.name = "DDQN"
-        self.network_target = mini_network().to(self.device)
-
-
-
-    def learn(self, experiences, gamma):
+    # def learn(self, experiences, gamma):
         # Obtain random minibatch of tuples from D
         states, actions, rewards, next_states, dones = experiences
         states = states.unsqueeze(1)
@@ -215,6 +290,7 @@ class DDQN(Agent):
             target_param.data.copy_(SOFT_UPDATE_RATE*local_param.data + (1.0-SOFT_UPDATE_RATE)*target_param.data)
 
 
+# TODO: update to use cuda
 class REINFORCE(Agent):
     def __init__(self,env,local_network=reinforce_network,seed=42,batch_size=64,gamma=0.99,LR=5e-4):
         super().__init__(env=env,seed=seed,local_network=local_network,batch_size=batch_size,gamma=gamma,LR=LR)
@@ -234,6 +310,7 @@ class REINFORCE(Agent):
             
         discounted_rewards = T.tensor(discounted_rewards)
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (discounted_rewards.std() + 1e-9) # normalize discounted rewards
+        discounted_rewards = discounted_rewards.to(self.device)
 
         policy_gradient = []
         for log_prob, Gt in zip(log_probs, discounted_rewards):
@@ -248,34 +325,31 @@ class REINFORCE(Agent):
         numsteps = []
         avg_numsteps = []
         all_rewards = []
-        scores,ts = [],[]                  # list containing scores from each episode
+        scores,ts,dones = [],[],[]                  # list containing scores from each episode
         scores_window,ts_window = deque(maxlen=100), deque(maxlen=100) # last 100 scores
-        print("here")
         for episode in range(1,n_episodes+1):
+            if episode%50 == 0:
+                show_progress(scores,ts,20)
             state,_ = self.env.reset()
             state = super()._Agent__preprocess_obs(state)
             log_probs = []
             rewards = []
             score = 0
             for steps in range(max_t):
-                if(self.env_name != "EMPTYRGBImgObsWrapper"):
-                    hasKey = int(self.env.is_carrying_key())
-                    isDoorOpen = int(self.env.is_door_open())
+              
                 state = np.expand_dims(state, axis=0)
+                state = T.from_numpy(state).float().to(self.device)
                 action, log_prob = self.network_local.get_action(state)
                 new_state, reward, done, _,_ = self.env.step(action)
-                if(self.env_name == "EMPTYRGBImgObsWrapper"):
-                    reward = self.reward_shaping(reward)
-                else:
-                    hasKey_tag = int(self.env.is_carrying_key())
-                    isDoorOpen_tag = int(self.env.is_door_open())
-                    reward = self.reward_shaping(hasKey_tag , hasKey,isDoorOpen_tag , isDoorOpen)
-
+        
                 new_state = super()._Agent__preprocess_obs(new_state)
+                # new_state = T.from_numpy(new_state).float().to(self.device)
+
                 log_probs.append(log_prob)
                 rewards.append(reward)
                 score += reward
 
+                state = new_state
 
                 if done:
                     self.update_policy( rewards, log_probs)
@@ -284,7 +358,6 @@ class REINFORCE(Agent):
                     break
                 all_rewards.append(np.sum(rewards))
 
-                state = new_state
             scores_window.append(score)       # save most recent score
             scores.append(score)              # save most recent score
             ts_window.append(steps)
@@ -292,3 +365,4 @@ class REINFORCE(Agent):
             # print("episode: {}, total reward: {}, average_reward: {}, length: {}".format(episode, np.round(np.mean(rewards), decimals = 3),  np.round(np.mean(all_rewards[-10:]), decimals = 3), steps))
 
             print('Episode {}\tAverage Score: {:.2f}\tAverage steps: {:.2f} \n'.format(episode, np.mean(scores_window), np.mean(ts_window)), end="")
+        return scores, ts,dones
