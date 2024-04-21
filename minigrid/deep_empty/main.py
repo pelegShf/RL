@@ -61,9 +61,9 @@ def run_reinforce():
     # agent = REINFORCE(env,loss=F.mse_loss,LR=0.0003,update_every=20,gamma=0.8, seed=0)
     agent = REINFORCE(env=env,local_network=reinforce_network, seed=0)
 
-    scores, timesteps,dones = agent.train(n_episodes=5000, max_t=5000)
+    scores, timesteps,dones = agent.train(n_episodes=2, max_t=5000)
     # scores_reinforce, timesteps_reinforce = agent.train(n_episodes=5000, max_t=5000)
-
+    print(f"Done: {sum(dones)}/2 Avg. reward: {sum(scores)/len(scores)} Avg. length: {sum(timesteps)/len(timesteps)} ")
     end_time = time.time()  # Stop the timer
     elapsed_time = end_time - start_time  # Calculate elapsed time
     print(f"REINFORCE - Time taken: {elapsed_time} seconds")

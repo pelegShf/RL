@@ -6,6 +6,8 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
+import csv
+
 
 from networks import network, mini_network, reinforce_network
 from helpers import show_progress
@@ -365,4 +367,9 @@ class REINFORCE(Agent):
             # print("episode: {}, total reward: {}, average_reward: {}, length: {}".format(episode, np.round(np.mean(rewards), decimals = 3),  np.round(np.mean(all_rewards[-10:]), decimals = 3), steps))
 
             print('Episode {}\tAverage Score: {:.2f}\tAverage steps: {:.2f} \n'.format(episode, np.mean(scores_window), np.mean(ts_window)), end="")
+        with open(f'{self.name}_{self.env_name}_episode_data.csv', 'w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Rewards", "Steps", "Done"])
+            writer.writerows(zip(scores, ts, dones))
+
         return scores, ts,dones
